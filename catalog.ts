@@ -82,7 +82,7 @@ async function apiCall(baseUrl: string, auth: AuthState, body: any, proxyUrl?: s
   const url = proxyUrl
     ? `${proxyUrl}/api/chat/completions`
     : `${baseUrl}/api/chat/completions`;
-  const headers = proxyUrl ? {} : buildAuthHeaders(auth);
+  const headers = proxyUrl ? {} : { ...buildAuthHeaders(auth), "Content-Type": "application/json" };
   const r = await fetch(url, {
     method: "POST", headers, body: JSON.stringify(body),
   });
@@ -165,7 +165,7 @@ async function probeStreamOptions(baseUrl: string, auth: AuthState, modelId: str
   const url = proxyUrl
     ? `${proxyUrl}/api/chat/completions`
     : `${baseUrl}/api/chat/completions`;
-  const headers = proxyUrl ? {} : buildAuthHeaders(auth);
+  const headers = proxyUrl ? {} : { ...buildAuthHeaders(auth), "Content-Type": "application/json" };
   const r = await fetch(url, {
     method: "POST", headers,
     body: JSON.stringify({
@@ -220,6 +220,7 @@ async function probeCompat(
 }
 
 export async function fetchCatalog(baseUrl: string, auth: AuthState, proxyUrl?: string): Promise<CatalogModel[]> {
+  // Fetch model list via proxy (lightweight, no probe side-effects)
   const headers = proxyUrl ? {} : buildAuthHeaders(auth);
   const url = proxyUrl ? `${proxyUrl}/v1/models` : `${baseUrl}/api/models`;
   const resp = await fetch(url, { headers });
@@ -227,11 +228,13 @@ export async function fetchCatalog(baseUrl: string, auth: AuthState, proxyUrl?: 
   const data = await resp.json();
   const models: CatalogModel[] = (data.data || []).map(normalizeModel);
 
-  // Probe each model (serial to avoid rate limits)
+  // Probe each model directly against backend (bypass proxy to avoid
+  // self-referential deadlock: proxy handler calls getModelInfo -> getCatalog
+  // -> probes -> proxy -> getModelInfo -> same pending catalogPromise)
   for (const m of models) {
-    m.reasoning = await probeReasoning(baseUrl, auth, m.id, proxyUrl);
-    m.tools = await probeTools(baseUrl, auth, m.id, proxyUrl);
-    m.compat = await probeCompat(baseUrl, auth, m.id, m.reasoning, m.tools, proxyUrl);
+    m.reasoning = await probeReasoning(baseUrl, auth, m.id);
+    m.tools = await probeTools(baseUrl, auth, m.id);
+    m.compat = await probeCompat(baseUrl, auth, m.id, m.reasoning, m.tools);
   }
 
   const cache: CatalogCache = { models, fetchedAt: Date.now() };
