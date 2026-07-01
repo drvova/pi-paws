@@ -1,15 +1,12 @@
 /**
- * proxy.ts — HTTP server (OpenAI API -> gRPC translation).
+ * proxy.ts — Transparent OpenAI-compatible proxy.
  *
- * Local HTTP proxy that translates incoming OpenAI-compatible requests
- * into the format expected by ai.paws.best, handling auth, streaming,
- * and response normalization.
+ * Receives requests from Pi on localhost, forwards to ai.paws.best
+ * with auth headers. Passes SSE stream through unmodified.
  */
 
 import type { AuthState } from "./auth";
 import { buildAuthHeaders } from "./auth";
-import { getCatalog, type CatalogModel } from "./catalog";
-import { streamChat, chatCompletion, prepareRequest, type ChatRequest, type ChatMessage } from "./chat";
 
 export interface ProxyConfig {
   baseUrl: string;
@@ -19,38 +16,6 @@ export interface ProxyConfig {
 export interface ProxyServer {
   port: number;
   close(): Promise<void>;
-}
-
-function normalizeMessages(messages: any[]): ChatMessage[] {
-  return messages.map((m) => ({
-    role: m.role,
-    content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-    ...(m.reasoning_content ? { reasoning_content: m.reasoning_content } : {}),
-    ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
-    ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
-    ...(m.name ? { name: m.name } : {}),
-  }));
-}
-
-function normalizeRequest(
-  body: any,
-  modelMaxTokens: number | undefined,
-  modelSupportsTools: boolean,
-): ChatRequest {
-  const raw: ChatRequest = {
-    model: body.model,
-    messages: normalizeMessages(body.messages || []),
-    stream: body.stream !== false,
-    max_tokens: body.max_tokens || body.max_completion_tokens,
-    temperature: body.temperature,
-    top_p: body.top_p,
-    stop: body.stop,
-    // Strip tools if model doesn't support them (e.g. Kimi)
-    tools: modelSupportsTools ? body.tools : undefined,
-    tool_choice: modelSupportsTools ? body.tool_choice : undefined,
-    reasoning_effort: body.reasoning_effort,
-  };
-  return prepareRequest(raw, modelMaxTokens);
 }
 
 function sseHeaders(): Record<string, string> {
@@ -66,6 +31,7 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
   const { createServer } = require("http");
   const server = createServer(async (req: any, res: any) => {
     console.error(`[paws-proxy] ${req.method} ${req.url}`);
+
     // CORS
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -80,65 +46,6 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
     if (req.method === "GET" && req.url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
-      return;
-    }
-
-    // Chat completions
-    console.error(`[paws-proxy] ${req.method} ${req.url}`);
-    if (req.method === "POST" && (req.url === "/v1/chat/completions" || req.url === "/chat/completions")) {
-      const auth = await getAuth();
-      if (!auth) {
-        res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Not authenticated" }));
-        return;
-      }
-
-      let rawBody = "";
-      for await (const chunk of req) rawBody += chunk;
-
-      let body: any;
-      try {
-        body = JSON.parse(rawBody);
-      } catch {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Invalid JSON" }));
-        return;
-      }
-
-      // Look up model's catalog entry
-      let modelMaxTokens: number | undefined;
-      let modelSupportsTools = true;
-      try {
-        const catalog = await getCatalog(config.baseUrl, auth);
-        const found = catalog.find((m) => m.id === body.model);
-        modelMaxTokens = found?.maxTokens;
-        modelSupportsTools = found?.tools ?? true;
-      } catch {}
-
-      const request = normalizeRequest(body, modelMaxTokens, modelSupportsTools);
-
-      try {
-        if (request.stream) {
-          res.writeHead(200, sseHeaders());
-          for await (const chunk of streamChat(config.baseUrl, auth, request)) {
-            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-          }
-          res.write("data: [DONE]\n\n");
-          res.end();
-        } else {
-          const result = await chatCompletion(config.baseUrl, auth, request);
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify(result));
-        }
-      } catch (err: any) {
-        console.error("Proxy error:", err.message);
-        if (!res.headersSent) {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
-        } else {
-          res.end();
-        }
-      }
       return;
     }
 
@@ -164,7 +71,64 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
       return;
     }
 
-    console.error(`[paws-proxy] 404: ${req.method} ${req.url}`);
+    // Chat completions — transparent pass-through
+    if (req.method === "POST" && (req.url === "/v1/chat/completions" || req.url === "/chat/completions")) {
+      const auth = await getAuth();
+      if (!auth) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Not authenticated" }));
+        return;
+      }
+
+      let rawBody = "";
+      for await (const chunk of req) rawBody += chunk;
+
+      const body = JSON.parse(rawBody);
+      const isStream = body.stream !== false;
+
+      try {
+        const upstreamResp = await fetch(`${config.baseUrl}/api/chat/completions`, {
+          method: "POST",
+          headers: {
+            ...buildAuthHeaders(auth),
+            "Content-Type": "application/json",
+          },
+          body: rawBody,
+        });
+
+        if (isStream) {
+          res.writeHead(upstreamResp.status, sseHeaders());
+          const reader = upstreamResp.body?.getReader();
+          if (reader) {
+            const decoder = new TextDecoder();
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                res.write(value);
+              }
+            } finally {
+              reader.releaseLock();
+            }
+          }
+          res.end();
+        } else {
+          const data = await upstreamResp.json();
+          res.writeHead(upstreamResp.status, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(data));
+        }
+      } catch (err: any) {
+        console.error("[paws-proxy] error:", err.message);
+        if (!res.headersSent) {
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        } else {
+          res.end();
+        }
+      }
+      return;
+    }
+
     res.writeHead(404);
     res.end("Not found");
   });
