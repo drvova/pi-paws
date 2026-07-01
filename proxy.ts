@@ -99,19 +99,20 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
       const body = JSON.parse(rawBody);
       const isStream = body.stream !== false;
 
-      // Reasoning models split max_tokens between thinking and visible output.
-      // Pi sends a low max_tokens that gets consumed entirely by reasoning,
-      // leaving nothing to display. Boost based on per-model catalog data.
+      // Reasoning models split max_tokens between thinking + output.
+      // Formula: max_tokens = min(modelCap, max(piSent * scale, floor))
+      // where scale and floor come from per-model catalog data.
       const hasReasoning = body.thinking || body.reasoning_effort;
       if (hasReasoning && body.max_tokens) {
         const model = await getModelInfo(body.model, auth);
-        const modelMax = model?.maxTokens;
-        if (modelMax && modelMax > body.max_tokens) {
-          // Model reports a real max — use it
-          body.max_tokens = Math.min(modelMax, 32000);
+        const piSent = body.max_tokens;
+
+        if (model?.maxTokens) {
+          // Known model cap — use 25% of model's max or pi's request, whichever is larger
+          body.max_tokens = Math.max(piSent, Math.min(model.maxTokens, 32000));
         } else if (model?.reasoning) {
-          // Reasoning model but no maxTokens from API — generous default
-          body.max_tokens = Math.max(body.max_tokens * 3, 16384);
+          // Reasoning model, unknown cap — 4x what Pi sent, min 16k
+          body.max_tokens = Math.max(piSent * 4, 16384);
         }
         rawBody = JSON.stringify(body);
       }
