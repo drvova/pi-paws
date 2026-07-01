@@ -92,17 +92,14 @@ async function apiCall(baseUrl: string, auth: AuthState, body: any, proxyUrl?: s
 async function probeReasoning(baseUrl: string, auth: AuthState, modelId: string, proxyUrl?: string): Promise<boolean> {
   const { data } = await apiCall(baseUrl, auth, {
     model: modelId, messages: [{ role: "user", content: "Say OK" }],
-    stream: false, max_tokens: 20,
+    stream: false, max_tokens: 50,
   }, proxyUrl);
   const msg = data?.choices?.[0]?.message;
-  // Check for reasoning_content field (deepseek-style)
-  if (typeof msg?.reasoning_content === "string" && msg.reasoning_content.length > 0) return true;
-  // Check usage for reasoning tokens (gemini/claude-style)
-  const usage = data?.usage;
-  const reasonTokens = usage?.completion_tokens_details?.reasoning_tokens ?? 0;
-  const totalTokens = usage?.completion_tokens ?? 0;
-  if (totalTokens > 0 && reasonTokens >= totalTokens * 0.5) return true;
-  return false;
+  // Only mark reasoning if the response includes reasoning_content —
+  // that's what Pi's stream parser reads. Models that do internal reasoning
+  // without exposing it (gemini, claude) should NOT be marked reasoning
+  // because Pi would then expect thinking deltas that never arrive.
+  return typeof msg?.reasoning_content === "string" && msg.reasoning_content.length > 0;
 }
 
 async function probeTools(baseUrl: string, auth: AuthState, modelId: string, proxyUrl?: string): Promise<boolean> {
