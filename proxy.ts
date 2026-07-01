@@ -83,7 +83,8 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
     }
 
     // Chat completions
-    if (req.method === "POST" && req.url === "/v1/chat/completions") {
+    console.error(`[paws-proxy] ${req.method} ${req.url}`);
+    if (req.method === "POST" && (req.url === "/v1/chat/completions" || req.url === "/chat/completions")) {
       const auth = await getAuth();
       if (!auth) {
         res.writeHead(401, { "Content-Type": "application/json" });
@@ -162,6 +163,7 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
       return;
     }
 
+    console.error(`[paws-proxy] 404: ${req.method} ${req.url}`);
     res.writeHead(404);
     res.end("Not found");
   });
