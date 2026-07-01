@@ -2,7 +2,7 @@
  * models.ts — Minimal pass-through (catalog is single source of truth).
  *
  * Converts CatalogModel entries into Pi's ProviderModelConfig[] format.
- * Only values the backend actually provides are set.
+ * All compat flags come from the catalog probes — nothing hardcoded.
  */
 
 import type { CatalogModel } from "./catalog.js";
@@ -25,19 +25,6 @@ export function catalogToPiModels(
     contextWindow: m.contextWindow ?? 0,
     maxTokens: m.maxTokens ?? 0,
     headers: extraHeaders,
-    compat: {
-      // Backend normalizes all tool calls to OpenAI format
-      supportsStore: false,
-      supportsDeveloperRole: false,
-      supportsReasoningEffort: false,
-      supportsUsageInStreaming: true,
-      maxTokensField: "max_tokens",
-      // Backend returns reasoning_content in Deepseek format for all models
-      thinkingFormat: "deepseek",
-      // Tool support detected per-model by catalog probe
-      requiresToolResultName: false,
-      requiresAssistantAfterToolResult: false,
-      requiresThinkingAsText: false,
-    },
+    compat: m.compat,
   }));
 }
