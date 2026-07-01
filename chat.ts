@@ -5,8 +5,8 @@
  * decodes streaming response chunks, and normalizes into OpenAI SSE events.
  */
 
-import type { AuthState } from "./auth.js";
-import { buildPlainHeaders } from "./metadata.js";
+import type { AuthState } from "./auth";
+import { buildPlainHeaders } from "./metadata";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";

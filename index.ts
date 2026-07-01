@@ -16,10 +16,10 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getStoredToken, refreshJwt, clearToken, type AuthState } from "./auth.js";
-import { getCatalog, fetchCatalog } from "./catalog.js";
-import { catalogToPiModels } from "./models.js";
-import { pawsOAuthLogin, pawsRefreshToken, pawsGetApiKey } from "./oauth.js";
+import { getStoredToken, refreshJwt, clearToken, type AuthState } from "./auth";
+import { getCatalog, fetchCatalog } from "./catalog";
+import { catalogToPiModels } from "./models";
+import { pawsOAuthLogin, pawsRefreshToken, pawsGetApiKey } from "./oauth";
 
 const PROVIDER_NAME = "paws";
 const BASE_URL = "https://ai.paws.best";

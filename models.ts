@@ -5,7 +5,7 @@
  * All compat flags come from the catalog probes — nothing hardcoded.
  */
 
-import type { CatalogModel } from "./catalog.js";
+import type { CatalogModel } from "./catalog";
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 

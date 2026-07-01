@@ -6,7 +6,7 @@
  * Zero hardcoded values — everything comes from the backend.
  */
 
-import { buildAuthHeaders, type AuthState } from "./auth.js";
+import { buildAuthHeaders, type AuthState } from "./auth";
 
 export interface CatalogCompat {
   supportsStore: boolean;

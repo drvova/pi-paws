@@ -6,7 +6,7 @@
  * or falls back to email/password sign-in.
  */
 
-import { getUserJwt } from "./auth.js";
+import { getUserJwt } from "./auth";
 
 const LOCALHOST_PORT = 18923;
 

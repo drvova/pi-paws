@@ -5,8 +5,8 @@
  * to the backend. Handles content-type, auth, and protocol versioning.
  */
 
-import type { AuthState } from "./auth.js";
-import { buildAuthHeaders } from "./auth.js";
+import type { AuthState } from "./auth";
+import { buildAuthHeaders } from "./auth";
 
 export interface RpcMetadata {
   headers: Record<string, string>;

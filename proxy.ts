@@ -6,10 +6,10 @@
  * and response normalization.
  */
 
-import type { AuthState } from "./auth.js";
-import { buildAuthHeaders } from "./auth.js";
-import { getCatalog, type CatalogModel } from "./catalog.js";
-import { streamChat, chatCompletion, prepareRequest, type ChatRequest, type ChatMessage } from "./chat.js";
+import type { AuthState } from "./auth";
+import { buildAuthHeaders } from "./auth";
+import { getCatalog, type CatalogModel } from "./catalog";
+import { streamChat, chatCompletion, prepareRequest, type ChatRequest, type ChatMessage } from "./chat";
 
 export interface ProxyConfig {
   baseUrl: string;
