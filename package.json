@@ -1,0 +1,12 @@
+{
+  "name": "pi-paws",
+  "version": "1.0.0",
+  "description": "Pi extension for ai.paws.best (Open WebUI provider)",
+  "type": "module",
+  "main": "index.ts",
+  "pi": {
+    "extension": true,
+    "provider": "paws"
+  },
+  "dependencies": {}
+}
