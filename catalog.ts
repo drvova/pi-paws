@@ -75,9 +75,13 @@ function normalizeModel(raw: any): CatalogModel {
   return { id, name, contextWindow, maxTokens, reasoning: false, tools: false, compat: { ...DEFAULT_COMPAT }, input };
 }
 
-async function apiCall(baseUrl: string, auth: AuthState, body: any): Promise<any> {
-  const headers = buildAuthHeaders(auth);
-  const r = await fetch(`${baseUrl}/api/chat/completions`, {
+async function apiCall(baseUrl: string, auth: AuthState, body: any, proxyUrl?: string): Promise<any> {
+  // When proxyUrl is set, route through it (proxy adds auth headers)
+  const url = proxyUrl
+    ? `${proxyUrl}/api/chat/completions`
+    : `${baseUrl}/api/chat/completions`;
+  const headers = proxyUrl ? {} : buildAuthHeaders(auth);
+  const r = await fetch(url, {
     method: "POST", headers, body: JSON.stringify(body),
   });
   const text = await r.text();
@@ -85,45 +89,45 @@ async function apiCall(baseUrl: string, auth: AuthState, body: any): Promise<any
   catch { return { status: r.status, data: null, raw: text }; }
 }
 
-async function probeReasoning(baseUrl: string, auth: AuthState, modelId: string): Promise<boolean> {
+async function probeReasoning(baseUrl: string, auth: AuthState, modelId: string, proxyUrl?: string): Promise<boolean> {
   const { data } = await apiCall(baseUrl, auth, {
     model: modelId, messages: [{ role: "user", content: "Say OK" }],
     stream: false, max_tokens: 20,
-  });
+  }, proxyUrl);
   const r = data?.choices?.[0]?.message?.reasoning_content;
   return typeof r === "string" && r.length > 0;
 }
 
-async function probeTools(baseUrl: string, auth: AuthState, modelId: string): Promise<boolean> {
+async function probeTools(baseUrl: string, auth: AuthState, modelId: string, proxyUrl?: string): Promise<boolean> {
   const { status, data } = await apiCall(baseUrl, auth, {
     model: modelId,
     messages: [{ role: "user", content: "What is the weather in Tokyo?" }],
     tools: [{ type: "function", function: { name: "get_weather", description: "Get weather", parameters: { type: "object", properties: { city: { type: "string" } }, required: ["city"] } } }],
     tool_choice: "auto", stream: false, max_tokens: 50,
-  });
+  }, proxyUrl);
   if (status !== 200) return false;
   if (data?.detail) return false;
   return !!data?.choices?.[0]?.message?.tool_calls?.length;
 }
 
-async function probeDeveloperRole(baseUrl: string, auth: AuthState, modelId: string): Promise<boolean> {
+async function probeDeveloperRole(baseUrl: string, auth: AuthState, modelId: string, proxyUrl?: string): Promise<boolean> {
   const { status } = await apiCall(baseUrl, auth, {
     model: modelId,
     messages: [{ role: "developer", content: "Be helpful" }, { role: "user", content: "Say OK" }],
     stream: false, max_tokens: 10,
-  });
+  }, proxyUrl);
   return status === 200;
 }
 
-async function probeReasoningEffort(baseUrl: string, auth: AuthState, modelId: string): Promise<boolean> {
+async function probeReasoningEffort(baseUrl: string, auth: AuthState, modelId: string, proxyUrl?: string): Promise<boolean> {
   const { status } = await apiCall(baseUrl, auth, {
     model: modelId, messages: [{ role: "user", content: "Say OK" }],
     reasoning_effort: "high", stream: false, max_tokens: 20,
-  });
+  }, proxyUrl);
   return status === 200;
 }
 
-async function probeRequiresReasoningContent(baseUrl: string, auth: AuthState, modelId: string): Promise<boolean> {
+async function probeRequiresReasoningContent(baseUrl: string, auth: AuthState, modelId: string, proxyUrl?: string): Promise<boolean> {
   // Send tool call with reasoning_content, then tool result without reasoning_content
   const { status } = await apiCall(baseUrl, auth, {
     model: modelId,
@@ -133,13 +137,16 @@ async function probeRequiresReasoningContent(baseUrl: string, auth: AuthState, m
       { role: "tool", tool_call_id: "c1", content: '{"temp":22}' },
     ],
     stream: false, max_tokens: 20,
-  });
+  }, proxyUrl);
   return status === 400;
 }
 
-async function probeStreamOptions(baseUrl: string, auth: AuthState, modelId: string): Promise<boolean> {
-  const headers = buildAuthHeaders(auth);
-  const r = await fetch(`${baseUrl}/api/chat/completions`, {
+async function probeStreamOptions(baseUrl: string, auth: AuthState, modelId: string, proxyUrl?: string): Promise<boolean> {
+  const url = proxyUrl
+    ? `${proxyUrl}/api/chat/completions`
+    : `${baseUrl}/api/chat/completions`;
+  const headers = proxyUrl ? {} : buildAuthHeaders(auth);
+  const r = await fetch(url, {
     method: "POST", headers,
     body: JSON.stringify({
       model: modelId, messages: [{ role: "user", content: "Say OK" }],
@@ -162,15 +169,15 @@ async function probeStreamOptions(baseUrl: string, auth: AuthState, modelId: str
 }
 
 async function probeCompat(
-  baseUrl: string, auth: AuthState, modelId: string, hasReasoning: boolean, hasTools: boolean,
+  baseUrl: string, auth: AuthState, modelId: string, hasReasoning: boolean, hasTools: boolean, proxyUrl?: string,
 ): Promise<CatalogCompat> {
   const compat = { ...DEFAULT_COMPAT };
 
   // Run probes in parallel
   const [devRole, reasoningEffort, streamOpts] = await Promise.all([
-    probeDeveloperRole(baseUrl, auth, modelId),
-    probeReasoningEffort(baseUrl, auth, modelId),
-    probeStreamOptions(baseUrl, auth, modelId),
+    probeDeveloperRole(baseUrl, auth, modelId, proxyUrl),
+    probeReasoningEffort(baseUrl, auth, modelId, proxyUrl),
+    probeStreamOptions(baseUrl, auth, modelId, proxyUrl),
   ]);
 
   compat.supportsDeveloperRole = devRole;
@@ -178,12 +185,12 @@ async function probeCompat(
   compat.supportsUsageInStreaming = streamOpts;
 
   if (hasReasoning) {
-    compat.requiresReasoningContentOnAssistantMessages = await probeRequiresReasoningContent(baseUrl, auth, modelId);
+    compat.requiresReasoningContentOnAssistantMessages = await probeRequiresReasoningContent(baseUrl, auth, modelId, proxyUrl);
     // Probe thinking format: check response field names
     const { data } = await apiCall(baseUrl, auth, {
       model: modelId, messages: [{ role: "user", content: "Say OK" }],
       stream: false, max_tokens: 20,
-    });
+    }, proxyUrl);
     const msg = data?.choices?.[0]?.message || {};
     if (msg.reasoning_content !== undefined) compat.thinkingFormat = "deepseek";
     else if (msg.thinking !== undefined) compat.thinkingFormat = "zai";
@@ -193,18 +200,19 @@ async function probeCompat(
   return compat;
 }
 
-export async function fetchCatalog(baseUrl: string, auth: AuthState): Promise<CatalogModel[]> {
-  const headers = buildAuthHeaders(auth);
-  const resp = await fetch(`${baseUrl}/api/models`, { headers });
+export async function fetchCatalog(baseUrl: string, auth: AuthState, proxyUrl?: string): Promise<CatalogModel[]> {
+  const headers = proxyUrl ? {} : buildAuthHeaders(auth);
+  const url = proxyUrl ? `${proxyUrl}/v1/models` : `${baseUrl}/api/models`;
+  const resp = await fetch(url, { headers });
   if (!resp.ok) throw new Error(`Catalog fetch failed (${resp.status})`);
   const data = await resp.json();
   const models: CatalogModel[] = (data.data || []).map(normalizeModel);
 
   // Probe each model (serial to avoid rate limits)
   for (const m of models) {
-    m.reasoning = await probeReasoning(baseUrl, auth, m.id);
-    m.tools = await probeTools(baseUrl, auth, m.id);
-    m.compat = await probeCompat(baseUrl, auth, m.id, m.reasoning, m.tools);
+    m.reasoning = await probeReasoning(baseUrl, auth, m.id, proxyUrl);
+    m.tools = await probeTools(baseUrl, auth, m.id, proxyUrl);
+    m.compat = await probeCompat(baseUrl, auth, m.id, m.reasoning, m.tools, proxyUrl);
   }
 
   const cache: CatalogCache = { models, fetchedAt: Date.now() };
@@ -236,8 +244,8 @@ export function getCachedCatalog(): CatalogModel[] | null {
   } catch { return null; }
 }
 
-export async function getCatalog(baseUrl: string, auth: AuthState): Promise<CatalogModel[]> {
+export async function getCatalog(baseUrl: string, auth: AuthState, proxyUrl?: string): Promise<CatalogModel[]> {
   const cached = getCachedCatalog();
   if (cached && cached.length > 0) return cached;
-  return fetchCatalog(baseUrl, auth);
+  return fetchCatalog(baseUrl, auth, proxyUrl);
 }

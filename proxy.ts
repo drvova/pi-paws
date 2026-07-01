@@ -85,7 +85,7 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
     }
 
     // Chat completions — transparent pass-through with per-model adjustments
-    if (req.method === "POST" && (req.url === "/v1/chat/completions" || req.url === "/chat/completions")) {
+    if (req.method === "POST" && (req.url === "/v1/chat/completions" || req.url === "/chat/completions" || req.url === "/api/chat/completions")) {
       const auth = await getAuth();
       if (!auth) {
         res.writeHead(401, { "Content-Type": "application/json" });

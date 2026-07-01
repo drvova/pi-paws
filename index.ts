@@ -24,6 +24,11 @@ function ensureProxy(): number {
   return proxyInstance.port;
 }
 
+function proxyUrl(): string {
+  const port = ensureProxy();
+  return `http://127.0.0.1:${port}`;
+}
+
 function buildProviderConfig(authToken: string, models: any[]) {
   const port = ensureProxy();
   return {
@@ -64,7 +69,7 @@ export default async function (pi: ExtensionAPI) {
     try {
       const auth = await refreshJwt(ROOT);
       if (auth) {
-        const catalog = await getCatalog(ROOT, auth);
+        const catalog = await getCatalog(ROOT, auth, proxyUrl());
         const models = modelsToPi(catalog);
         pi.registerProvider(PROVIDER_NAME, buildProviderConfig(auth.token, models));
         console.error(`[paws] connected — ${models.length} models`);
@@ -88,7 +93,7 @@ export default async function (pi: ExtensionAPI) {
       try {
         const refreshed = await refreshJwt(ROOT);
         if (refreshed) {
-          const catalog = await getCatalog(ROOT, refreshed);
+          const catalog = await getCatalog(ROOT, refreshed, proxyUrl());
           const models = modelsToPi(catalog);
           pi.registerProvider(PROVIDER_NAME, buildProviderConfig(refreshed.token, models));
           console.error(`[paws] connected — ${models.length} models`);
@@ -132,7 +137,7 @@ export default async function (pi: ExtensionAPI) {
           ctx.ui.notify("Paws: Token expired. Use /login paws.", "error");
           return;
         }
-        const catalog = await fetchCatalog(ROOT, refreshed);
+        const catalog = await fetchCatalog(ROOT, refreshed, proxyUrl());
         const models = modelsToPi(catalog);
         pi.registerProvider(PROVIDER_NAME, buildProviderConfig(refreshed.token, models));
         ctx.ui.notify(`Paws: Refreshed ${models.length} models`, "info");
