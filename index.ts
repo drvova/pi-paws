@@ -28,7 +28,7 @@ function buildProviderConfig(authToken: string, models: any[]) {
   const port = ensureProxy();
   return {
     name: "Paws WebUI",
-    baseUrl: `http://127.0.0.1:${port}`,
+    baseUrl: `http://127.0.0.1:${port}/v1`,
     apiKey: authToken,
     api: "openai-completions",
     authHeader: true,
