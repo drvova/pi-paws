@@ -3,16 +3,6 @@
  *
  * Registers ai.paws.best as a Pi provider, fetches the live model catalog,
  * and wires up the OAuth login flow for /login support.
- *
- * Architecture:
- *   catalog.ts  -> fetches models from /api/models
- *   models.ts   -> converts catalog to Pi ProviderModelConfig[]
- *   auth.ts     -> JWT lifecycle (decode, refresh, mint)
- *   oauth.ts    -> /login flow (email/password)
- *   chat.ts     -> streaming chat completions
- *   proxy.ts    -> optional local HTTP proxy
- *   metadata.ts -> Connect-RPC headers
- *   wire.ts     -> protobuf wire format helpers
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -24,122 +14,90 @@ import { pawsOAuthLogin, pawsRefreshToken, pawsGetApiKey } from "./oauth";
 const PROVIDER_NAME = "paws";
 const BASE_URL = "https://ai.paws.best";
 
-export default function pawsExtension(pi: ExtensionAPI) {
-  let currentAuth: AuthState | null = null;
+function buildProviderConfig(authToken: string, models: any[]) {
+  return {
+    name: "Paws WebUI",
+    baseUrl: BASE_URL,
+    apiKey: authToken,
+    api: "openai-completions",
+    models,
+    oauth: {
+      name: "Paws WebUI",
+      login: (callbacks: any) => pawsOAuthLogin(BASE_URL, callbacks),
+      refreshToken: (creds: any) => pawsRefreshToken(BASE_URL, creds),
+      getApiKey: (creds: any) => pawsGetApiKey(creds),
+    },
+  };
+}
 
-  async function ensureAuth(): Promise<AuthState | null> {
-    if (currentAuth) return currentAuth;
-    currentAuth = getStoredToken();
-    if (currentAuth) {
-      currentAuth = await refreshJwt(BASE_URL);
-    }
-    return currentAuth;
-  }
+function modelsToPi(catalog: any[]) {
+  return catalogToPiModels(catalog, BASE_URL).map((m) => ({
+    id: m.id,
+    name: m.name,
+    reasoning: m.reasoning,
+    input: m.input,
+    cost: m.cost,
+    contextWindow: m.contextWindow,
+    maxTokens: m.maxTokens,
+    headers: m.headers,
+    compat: m.compat,
+  }));
+}
 
-  async function loadAndRegisterModels() {
-    const auth = await ensureAuth();
-    if (!auth) return;
+export default async function (pi: ExtensionAPI) {
+  const stored = getStoredToken();
+  let hasCreds = !!stored;
 
+  if (hasCreds) {
     try {
-      const catalog = await getCatalog(BASE_URL, auth);
-      const models = catalogToPiModels(catalog, BASE_URL);
-
-      pi.registerProvider(PROVIDER_NAME, {
-        name: "Paws WebUI",
-        baseUrl: BASE_URL,
-        apiKey: auth.token,
-        api: "openai-completions",
-        models: models.map((m) => ({
-          id: m.id,
-          name: m.name,
-          reasoning: m.reasoning,
-          thinkingLevelMap: m.thinkingLevelMap,
-          input: m.input,
-          cost: m.cost,
-          contextWindow: m.contextWindow,
-          maxTokens: m.maxTokens,
-          headers: m.headers,
-          compat: m.compat,
-        })),
-        oauth: {
-          name: "Paws WebUI",
-          login: (callbacks) => pawsOAuthLogin(BASE_URL, callbacks),
-          refreshToken: (creds) => pawsRefreshToken(BASE_URL, creds),
-          getApiKey: (creds) => pawsGetApiKey(creds),
-        },
-      });
-    } catch (err: any) {
-      console.error("Paws: Failed to load catalog:", err.message);
+      const auth = await refreshJwt(BASE_URL);
+      if (auth) {
+        const catalog = await getCatalog(BASE_URL, auth);
+        const models = modelsToPi(catalog);
+        pi.registerProvider(PROVIDER_NAME, buildProviderConfig(auth.token, models));
+        console.error(`[paws] connected — ${models.length} models`);
+      } else {
+        hasCreds = false;
+      }
+    } catch {
+      hasCreds = false;
     }
   }
 
-  // Load on startup
-  loadAndRegisterModels();
-
-  // Refresh token before each provider request
-  pi.on("before_provider_request", async (event, ctx) => {
-    const auth = await ensureAuth();
-    if (auth && ctx.model?.provider === PROVIDER_NAME) {
-      // Attach auth headers to the outgoing request
-      const payload = event.payload as any;
-      if (payload && typeof payload === "object") {
-        payload._pawsHeaders = {
-          Authorization: `Bearer ${auth.token}`,
-          Cookie: `token=${auth.token}`,
-        };
-      }
-    }
-  });
+  if (!hasCreds) {
+    pi.registerProvider(PROVIDER_NAME, buildProviderConfig("", []));
+    console.error("[paws] /login paws to connect");
+  }
 
   // Re-register models after login
   pi.on("session_start", async () => {
     const auth = getStoredToken();
     if (auth) {
-      currentAuth = auth;
-      await loadAndRegisterModels();
+      try {
+        const refreshed = await refreshJwt(BASE_URL);
+        if (refreshed) {
+          const catalog = await getCatalog(BASE_URL, refreshed);
+          const models = modelsToPi(catalog);
+          pi.registerProvider(PROVIDER_NAME, buildProviderConfig(refreshed.token, models));
+          console.error(`[paws] connected — ${models.length} models`);
+        }
+      } catch {}
     }
   });
 
-  // Register /paws command for manual refresh
+  // Register /paws command
   pi.registerCommand("paws", {
     description: "Refresh Paws model catalog or show status",
     handler: async (args, ctx) => {
-      const auth = await ensureAuth();
-      if (!auth) {
-        ctx.ui.notify("Not authenticated. Use /login to sign in.", "warning");
+      const subcommand = args.trim().split(/\s+/)[0];
+
+      if (subcommand === "logout") {
+        clearToken();
+        ctx.ui.notify("Paws: Logged out", "info");
         return;
       }
-      const subcommand = args.trim().split(/\s+/)[0];
-      if (subcommand === "refresh" || subcommand === "") {
-        try {
-          const catalog = await fetchCatalog(BASE_URL, auth);
-          const models = catalogToPiModels(catalog, BASE_URL);
-          pi.registerProvider(PROVIDER_NAME, {
-            name: "Paws WebUI",
-            baseUrl: BASE_URL,
-            apiKey: auth.token,
-            api: "openai-completions",
-            models: models.map((m) => ({
-              id: m.id,
-              name: m.name,
-              reasoning: m.reasoning,
-              thinkingLevelMap: m.thinkingLevelMap,
-              input: m.input,
-              cost: m.cost,
-              contextWindow: m.contextWindow,
-              maxTokens: m.maxTokens,
-              compat: m.compat,
-            })),
-          });
-          ctx.ui.notify(`Paws: Refreshed ${models.length} models`, "info");
-        } catch (err: any) {
-          ctx.ui.notify(`Paws: Refresh failed: ${err.message}`, "error");
-        }
-      } else if (subcommand === "logout") {
-        clearToken();
-        currentAuth = null;
-        ctx.ui.notify("Paws: Logged out", "info");
-      } else if (subcommand === "status") {
+
+      if (subcommand === "status") {
         const token = getStoredToken();
         if (token) {
           const expires = new Date(token.payload.exp * 1000).toLocaleString();
@@ -147,6 +105,27 @@ export default function pawsExtension(pi: ExtensionAPI) {
         } else {
           ctx.ui.notify("Paws: Not authenticated", "warning");
         }
+        return;
+      }
+
+      // Default: refresh catalog
+      const auth = getStoredToken();
+      if (!auth) {
+        ctx.ui.notify("Not authenticated. Use /login paws first.", "warning");
+        return;
+      }
+      try {
+        const refreshed = await refreshJwt(BASE_URL);
+        if (!refreshed) {
+          ctx.ui.notify("Paws: Token expired. Use /login paws.", "error");
+          return;
+        }
+        const catalog = await fetchCatalog(BASE_URL, refreshed);
+        const models = modelsToPi(catalog);
+        pi.registerProvider(PROVIDER_NAME, buildProviderConfig(refreshed.token, models));
+        ctx.ui.notify(`Paws: Refreshed ${models.length} models`, "info");
+      } catch (err: any) {
+        ctx.ui.notify(`Paws: Refresh failed: ${err.message}`, "error");
       }
     },
   });
