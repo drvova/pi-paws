@@ -20,6 +20,7 @@ function buildProviderConfig(authToken: string, models: any[]) {
     baseUrl: BASE_URL,
     apiKey: authToken,
     api: "openai-completions",
+    authHeader: true,
     models,
     oauth: {
       name: "Paws WebUI",
