@@ -30,7 +30,6 @@ function sseHeaders(): Record<string, string> {
 export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthState | null>): ProxyServer {
   const { createServer } = require("http");
   const server = createServer(async (req: any, res: any) => {
-    console.error(`[paws-proxy] ${req.method} ${req.url}`);
 
     // CORS
     res.setHeader("Access-Control-Allow-Origin", "*");
