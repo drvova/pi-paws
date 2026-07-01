@@ -10,24 +10,29 @@ import { getStoredToken, refreshJwt, clearToken, type AuthState } from "./auth";
 import { getCatalog, fetchCatalog } from "./catalog";
 import { catalogToPiModels } from "./models";
 import { pawsOAuthLogin, pawsRefreshToken, pawsGetApiKey } from "./oauth";
+import { createProxy } from "./proxy";
 
 const PROVIDER_NAME = "paws";
-// Pi appends /chat/completions to baseUrl, so this becomes /api/chat/completions
-const API_BASE = "https://ai.paws.best/api";
-// Auth/catalog endpoints live at the root domain
 const ROOT = "https://ai.paws.best";
+const PROXY_PORT = 18235;
+
+let proxyInstance: any = null;
+
+function ensureProxy(): number {
+  if (proxyInstance) return proxyInstance.port;
+  proxyInstance = createProxy({ baseUrl: ROOT, port: PROXY_PORT }, async () => getStoredToken());
+  return proxyInstance.port;
+}
 
 function buildProviderConfig(authToken: string, models: any[]) {
+  const port = ensureProxy();
   return {
     name: "Paws WebUI",
-    baseUrl: API_BASE,
+    baseUrl: `http://127.0.0.1:${port}`,
     apiKey: authToken,
     api: "openai-completions",
     authHeader: true,
     models,
-    headers: {
-      "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    },
     oauth: {
       name: "Paws WebUI",
       login: (callbacks: any) => pawsOAuthLogin(ROOT, callbacks),
@@ -38,7 +43,7 @@ function buildProviderConfig(authToken: string, models: any[]) {
 }
 
 function modelsToPi(catalog: any[]) {
-  return catalogToPiModels(catalog, API_BASE).map((m) => ({
+  return catalogToPiModels(catalog, ROOT).map((m) => ({
     id: m.id,
     name: m.name,
     reasoning: m.reasoning,
