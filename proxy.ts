@@ -32,7 +32,11 @@ function normalizeMessages(messages: any[]): ChatMessage[] {
   }));
 }
 
-function normalizeRequest(body: any, modelMaxTokens: number | undefined): ChatRequest {
+function normalizeRequest(
+  body: any,
+  modelMaxTokens: number | undefined,
+  modelSupportsTools: boolean,
+): ChatRequest {
   const raw: ChatRequest = {
     model: body.model,
     messages: normalizeMessages(body.messages || []),
@@ -41,8 +45,9 @@ function normalizeRequest(body: any, modelMaxTokens: number | undefined): ChatRe
     temperature: body.temperature,
     top_p: body.top_p,
     stop: body.stop,
-    tools: body.tools,
-    tool_choice: body.tool_choice,
+    // Strip tools if model doesn't support them (e.g. Kimi)
+    tools: modelSupportsTools ? body.tools : undefined,
+    tool_choice: modelSupportsTools ? body.tool_choice : undefined,
     reasoning_effort: body.reasoning_effort,
   };
   return prepareRequest(raw, modelMaxTokens);
@@ -98,15 +103,17 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
         return;
       }
 
-      // Look up model's maxTokens from catalog (undefined if backend didn't provide)
+      // Look up model's catalog entry
       let modelMaxTokens: number | undefined;
+      let modelSupportsTools = true;
       try {
         const catalog = await getCatalog(config.baseUrl, auth);
         const found = catalog.find((m) => m.id === body.model);
         modelMaxTokens = found?.maxTokens;
+        modelSupportsTools = found?.tools ?? true;
       } catch {}
 
-      const request = normalizeRequest(body, modelMaxTokens);
+      const request = normalizeRequest(body, modelMaxTokens, modelSupportsTools);
 
       try {
         if (request.stream) {
