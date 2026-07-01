@@ -5,8 +5,7 @@
   "type": "module",
   "main": "index.ts",
   "pi": {
-    "extension": true,
-    "provider": "paws"
+    "extensions": ["./index.ts"]
   },
   "dependencies": {}
 }

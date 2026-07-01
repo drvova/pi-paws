@@ -15,7 +15,7 @@
  *   wire.ts     -> protobuf wire format helpers
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getStoredToken, refreshJwt, clearToken, type AuthState } from "./auth.js";
 import { getCatalog, fetchCatalog } from "./catalog.js";
 import { catalogToPiModels } from "./models.js";
