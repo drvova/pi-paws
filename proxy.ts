@@ -102,19 +102,18 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
       // Reasoning models split max_tokens between thinking + output.
       // Formula: max_tokens = min(modelCap, max(piSent * scale, floor))
       // where scale and floor come from per-model catalog data.
-      const hasReasoning = body.thinking || body.reasoning_effort;
-      if (hasReasoning && body.max_tokens) {
+      const piSent = body.max_tokens;
+      if (piSent) {
         const model = await getModelInfo(body.model, auth);
-        const piSent = body.max_tokens;
-
-        if (model?.maxTokens) {
-          // Known model cap — use 25% of model's max or pi's request, whichever is larger
-          body.max_tokens = Math.max(piSent, Math.min(model.maxTokens, 32000));
-        } else if (model?.reasoning) {
-          // Reasoning model, unknown cap — 4x what Pi sent, min 16k
-          body.max_tokens = Math.max(piSent * 4, 16384);
+        const isReasoning = body.thinking || body.reasoning_effort || model?.reasoning;
+        if (isReasoning) {
+          if (model?.maxTokens) {
+            body.max_tokens = Math.max(piSent, Math.min(model.maxTokens, 32000));
+          } else {
+            body.max_tokens = Math.max(piSent * 4, 16384);
+          }
+          rawBody = JSON.stringify(body);
         }
-        rawBody = JSON.stringify(body);
       }
 
       try {
