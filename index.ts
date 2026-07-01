@@ -12,27 +12,30 @@ import { catalogToPiModels } from "./models";
 import { pawsOAuthLogin, pawsRefreshToken, pawsGetApiKey } from "./oauth";
 
 const PROVIDER_NAME = "paws";
-const BASE_URL = "https://ai.paws.best";
+// Pi appends /chat/completions to baseUrl, so this becomes /api/chat/completions
+const API_BASE = "https://ai.paws.best/api";
+// Auth/catalog endpoints live at the root domain
+const ROOT = "https://ai.paws.best";
 
 function buildProviderConfig(authToken: string, models: any[]) {
   return {
     name: "Paws WebUI",
-    baseUrl: BASE_URL,
+    baseUrl: API_BASE,
     apiKey: authToken,
     api: "openai-completions",
     authHeader: true,
     models,
     oauth: {
       name: "Paws WebUI",
-      login: (callbacks: any) => pawsOAuthLogin(BASE_URL, callbacks),
-      refreshToken: (creds: any) => pawsRefreshToken(BASE_URL, creds),
+      login: (callbacks: any) => pawsOAuthLogin(ROOT, callbacks),
+      refreshToken: (creds: any) => pawsRefreshToken(creds),
       getApiKey: (creds: any) => pawsGetApiKey(creds),
     },
   };
 }
 
 function modelsToPi(catalog: any[]) {
-  return catalogToPiModels(catalog, BASE_URL).map((m) => ({
+  return catalogToPiModels(catalog, API_BASE).map((m) => ({
     id: m.id,
     name: m.name,
     reasoning: m.reasoning,
@@ -51,9 +54,9 @@ export default async function (pi: ExtensionAPI) {
 
   if (hasCreds) {
     try {
-      const auth = await refreshJwt(BASE_URL);
+      const auth = await refreshJwt(ROOT);
       if (auth) {
-        const catalog = await getCatalog(BASE_URL, auth);
+        const catalog = await getCatalog(ROOT, auth);
         const models = modelsToPi(catalog);
         pi.registerProvider(PROVIDER_NAME, buildProviderConfig(auth.token, models));
         console.error(`[paws] connected — ${models.length} models`);
@@ -75,9 +78,9 @@ export default async function (pi: ExtensionAPI) {
     const auth = getStoredToken();
     if (auth) {
       try {
-        const refreshed = await refreshJwt(BASE_URL);
+        const refreshed = await refreshJwt(ROOT);
         if (refreshed) {
-          const catalog = await getCatalog(BASE_URL, refreshed);
+          const catalog = await getCatalog(ROOT, refreshed);
           const models = modelsToPi(catalog);
           pi.registerProvider(PROVIDER_NAME, buildProviderConfig(refreshed.token, models));
           console.error(`[paws] connected — ${models.length} models`);
@@ -116,12 +119,12 @@ export default async function (pi: ExtensionAPI) {
         return;
       }
       try {
-        const refreshed = await refreshJwt(BASE_URL);
+        const refreshed = await refreshJwt(ROOT);
         if (!refreshed) {
           ctx.ui.notify("Paws: Token expired. Use /login paws.", "error");
           return;
         }
-        const catalog = await fetchCatalog(BASE_URL, refreshed);
+        const catalog = await fetchCatalog(ROOT, refreshed);
         const models = modelsToPi(catalog);
         pi.registerProvider(PROVIDER_NAME, buildProviderConfig(refreshed.token, models));
         ctx.ui.notify(`Paws: Refreshed ${models.length} models`, "info");
