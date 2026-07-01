@@ -17,7 +17,7 @@ export interface CatalogCompat {
   requiresAssistantAfterToolResult: boolean;
   requiresThinkingAsText: boolean;
   requiresReasoningContentOnAssistantMessages: boolean;
-  thinkingFormat: "openai" | "deepseek" | "zai" | "qwen" | "qwen-chat-template";
+  thinkingFormat: "openai" | "deepseek" | "openrouter" | "responses";
   maxTokensField: "max_tokens" | "max_completion_tokens";
 }
 
@@ -88,7 +88,23 @@ async function apiCall(baseUrl: string, auth: AuthState, body: any, proxyUrl?: s
   });
   const text = await r.text();
   try { return { status: r.status, data: JSON.parse(text) }; }
-  catch { return { status: r.status, data: null, raw: text }; }
+  catch (e: any) { console.error("[paws-catalog] apiCall JSON parse failed:", e.message); return { status: r.status, data: null, raw: text }; }
+}
+
+function detectReasoning(msg: any): boolean {
+  if (!msg) return false;
+  return typeof msg.reasoning_content === "string" ||
+         typeof msg.reasoning === "string" ||
+         typeof msg.reasoning_signature === "string" ||
+         Array.isArray(msg.reasoning_details);
+}
+
+function detectThinkingFormat(msg: any): CatalogCompat["thinkingFormat"] {
+  if (!msg) return "openai";
+  if (msg.reasoning_content !== undefined) return "deepseek";
+  if (msg.reasoning !== undefined || Array.isArray(msg.reasoning_details)) return "openrouter";
+  if (msg.reasoning_signature !== undefined) return "responses";
+  return "openai";
 }
 
 async function probeReasoning(baseUrl: string, auth: AuthState, modelId: string, proxyUrl?: string): Promise<boolean> {
@@ -97,9 +113,9 @@ async function probeReasoning(baseUrl: string, auth: AuthState, modelId: string,
     stream: false, max_tokens: 50,
   }, proxyUrl);
   const msg = data?.choices?.[0]?.message;
-  const rc = typeof msg?.reasoning_content === "string" ? msg.reasoning_content.length : 0;
-  console.error(`[probe] ${modelId}: status=${status} reasoning_content_len=${rc} keys=${Object.keys(msg || {}).join(',')}`);
-  return rc > 0;
+  const hasReasoning = detectReasoning(msg);
+  console.error(`[probe] ${modelId}: status=${status} reasoning=${hasReasoning} keys=${Object.keys(msg || {}).join(',')}`);
+  return hasReasoning;
 }
 
 async function probeTools(baseUrl: string, auth: AuthState, modelId: string, proxyUrl?: string): Promise<boolean> {
@@ -189,16 +205,15 @@ async function probeCompat(
   compat.supportsUsageInStreaming = streamOpts;
 
   if (hasReasoning) {
-    compat.requiresReasoningContentOnAssistantMessages = await probeRequiresReasoningContent(baseUrl, auth, modelId, proxyUrl);
-    // Probe thinking format: check response field names
+    // Probe requiresReasoningContent directly against backend (bypass proxy
+    // which injects reasoning_content automatically, masking the raw behavior)
+    compat.requiresReasoningContentOnAssistantMessages = await probeRequiresReasoningContent(baseUrl, auth, modelId);
+    // Reuse the reasoning probe response to detect thinking format
     const { data } = await apiCall(baseUrl, auth, {
       model: modelId, messages: [{ role: "user", content: "Say OK" }],
       stream: false, max_tokens: 20,
     }, proxyUrl);
-    const msg = data?.choices?.[0]?.message || {};
-    if (msg.reasoning_content !== undefined) compat.thinkingFormat = "deepseek";
-    else if (msg.thinking !== undefined) compat.thinkingFormat = "zai";
-    else compat.thinkingFormat = "openai";
+    compat.thinkingFormat = detectThinkingFormat(data?.choices?.[0]?.message);
   }
 
   return compat;
@@ -249,7 +264,10 @@ export function getCachedCatalog(): CatalogModel[] | null {
     const cache: CatalogCache = JSON.parse(raw);
     if (Date.now() - cache.fetchedAt > CACHE_TTL_MS) return null;
     return cache.models;
-  } catch { return null; }
+  } catch (e: any) {
+    console.error("[paws-catalog] failed to read localStorage catalog cache:", e.message);
+    return null;
+  }
 }
 
 export async function getCatalog(baseUrl: string, auth: AuthState, proxyUrl?: string): Promise<CatalogModel[]> {
