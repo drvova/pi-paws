@@ -85,6 +85,14 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
       const body = JSON.parse(rawBody);
       const isStream = body.stream !== false;
 
+      // Reasoning models consume max_tokens for thinking — boost the budget
+      // so visible content has room after reasoning tokens are spent.
+      const hasReasoning = body.thinking || body.reasoning_effort;
+      if (hasReasoning && body.max_tokens) {
+        body.max_tokens = Math.min(body.max_tokens * 3, 32000);
+        rawBody = JSON.stringify(body);
+      }
+
       try {
         const upstreamResp = await fetch(`${config.baseUrl}/api/chat/completions`, {
           method: "POST",
