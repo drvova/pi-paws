@@ -35,6 +35,16 @@ export interface CatalogModel {
 const CATALOG_CACHE_KEY = "paws.catalog";
 const CACHE_TTL_MS = 30 * 60 * 1000;
 
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+
+function getCatalogCachePath(): string {
+  const dir = path.join(os.homedir(), ".pi", "credentials");
+  try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch {}
+  return path.join(dir, "paws-catalog.json");
+}
+
 interface CatalogCache {
   models: CatalogModel[];
   fetchedAt: number;
@@ -198,6 +208,9 @@ export async function fetchCatalog(baseUrl: string, auth: AuthState): Promise<Ca
   }
 
   const cache: CatalogCache = { models, fetchedAt: Date.now() };
+  // File storage (Node.js)
+  try { fs.writeFileSync(getCatalogCachePath(), JSON.stringify(cache), { mode: 0o600 }); } catch {}
+  // localStorage (browser)
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(cache));
   }
@@ -205,6 +218,14 @@ export async function fetchCatalog(baseUrl: string, auth: AuthState): Promise<Ca
 }
 
 export function getCachedCatalog(): CatalogModel[] | null {
+  // Try file storage (Node.js)
+  try {
+    const raw = fs.readFileSync(getCatalogCachePath(), "utf8");
+    const cache: CatalogCache = JSON.parse(raw);
+    if (Date.now() - cache.fetchedAt > CACHE_TTL_MS) return null;
+    return cache.models;
+  } catch {}
+  // Fallback to localStorage (browser)
   if (typeof localStorage === "undefined") return null;
   const raw = localStorage.getItem(CATALOG_CACHE_KEY);
   if (!raw) return null;
