@@ -38,27 +38,7 @@ export default function pawsExtension(pi: ExtensionAPI) {
 
   async function loadAndRegisterModels() {
     const auth = await ensureAuth();
-    if (!auth) {
-      // Register with placeholder until auth is available
-      pi.registerProvider(PROVIDER_NAME, {
-        name: "Paws WebUI",
-        baseUrl: BASE_URL,
-        api: "openai-completions",
-        apiKey: "paws-placeholder",
-        models: [
-          {
-            id: "deepseek.deepseek-v4-flash",
-            name: "Deepseek v4 Flash (Paws)",
-            reasoning: true,
-            input: ["text"],
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            contextWindow: 131_072,
-            maxTokens: 8_192,
-          },
-        ],
-      });
-      return;
-    }
+    if (!auth) return;
 
     try {
       const catalog = await getCatalog(BASE_URL, auth);
@@ -90,23 +70,6 @@ export default function pawsExtension(pi: ExtensionAPI) {
       });
     } catch (err: any) {
       console.error("Paws: Failed to load catalog:", err.message);
-      pi.registerProvider(PROVIDER_NAME, {
-        name: "Paws WebUI",
-        baseUrl: BASE_URL,
-        api: "openai-completions",
-        apiKey: auth.token,
-        models: [
-          {
-            id: "deepseek.deepseek-v4-flash",
-            name: "Deepseek v4 Flash (Paws)",
-            reasoning: true,
-            input: ["text"],
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            contextWindow: 131_072,
-            maxTokens: 8_192,
-          },
-        ],
-      });
     }
   }
 

@@ -1,8 +1,9 @@
 /**
- * catalog.ts — Live model catalog from three Cognition endpoints.
+ * catalog.ts — Live model catalog from backend.
  *
- * Fetches the available model list from /api/models, normalizes entries
- * into a shape Pi can consume, and caches until explicitly refreshed.
+ * Fetches the available model list from /api/models.
+ * All values come directly from the API response — nothing is inferred or hardcoded.
+ * Fields that the backend omits are left as undefined (not approximated).
  */
 
 import { buildAuthHeaders, type AuthState } from "./auth.js";
@@ -10,78 +11,38 @@ import { buildAuthHeaders, type AuthState } from "./auth.js";
 export interface CatalogModel {
   id: string;
   name: string;
-  contextWindow: number;
-  maxTokens: number;
+  contextWindow: number | undefined;
+  maxTokens: number | undefined;
   reasoning: boolean;
   input: ("text" | "image")[];
 }
 
 const CATALOG_CACHE_KEY = "paws.catalog";
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const CACHE_TTL_MS = 30 * 60 * 1000;
 
 interface CatalogCache {
   models: CatalogModel[];
   fetchedAt: number;
 }
 
-// Known reasoning models (output reasoning_content)
-const REASONING_PATTERNS = [
-  /deepseek/i,
-  /claude/i,
-  /gpt-5/i,
-  /mimo.*pro/i,
-  /kimi/i,
-  /gemini/i,
-];
-
-// Known image-capable models
-const IMAGE_PATTERNS = [
-  /claude/i,
-  /gemini/i,
-  /gpt/i,
-];
-
-function inferReasoning(id: string, name: string): boolean {
-  const probe = `${id} ${name}`;
-  return REASONING_PATTERNS.some((p) => p.test(probe));
-}
-
-function inferImageSupport(id: string, name: string): ("text" | "image")[] {
-  const probe = `${id} ${name}`;
-  const hasImage = IMAGE_PATTERNS.some((p) => p.test(probe));
-  return hasImage ? ["text", "image"] : ["text"];
-}
-
-function inferContextWindow(id: string): number {
-  if (/gemini/i.test(id)) return 1_048_576;
-  if (/claude/i.test(id)) return 200_000;
-  if (/deepseek/i.test(id)) return 131_072;
-  if (/mimo/i.test(id)) return 1_048_576;
-  if (/kimi/i.test(id)) return 131_072;
-  if (/gpt-5/i.test(id)) return 256_000;
-  return 128_000;
-}
-
-function inferMaxTokens(id: string): number {
-  if (/claude/i.test(id)) return 16_384;
-  if (/deepseek/i.test(id)) return 8_192;
-  if (/gemini/i.test(id)) return 65_536;
-  if (/mimo/i.test(id)) return 131_072;
-  if (/kimi/i.test(id)) return 8_192;
-  return 4_096;
-}
-
 function normalizeModel(raw: any): CatalogModel {
   const id = raw.id as string;
   const name = (raw.name as string) || id.split(".").pop() || id;
-  return {
-    id,
-    name,
-    contextWindow: raw.context_length || inferContextWindow(id),
-    maxTokens: raw.max_tokens || inferMaxTokens(id),
-    reasoning: inferReasoning(id, name),
-    input: inferImageSupport(id, name),
-  };
+  const openai = raw.openai || {};
+
+  // Pull directly from the API — top-level or openai nested object
+  const contextWindow = raw.context_length ?? openai.context_length ?? undefined;
+  const maxTokens = raw.max_tokens ?? openai.max_tokens ?? undefined;
+
+  // Reasoning: check capabilities if present, else false
+  const caps = raw.info?.meta?.capabilities || {};
+  const reasoning = caps.reasoning === true;
+
+  // Input types: check capabilities
+  const vision = caps.vision === true;
+  const input: ("text" | "image")[] = vision ? ["text", "image"] : ["text"];
+
+  return { id, name, contextWindow, maxTokens, reasoning, input };
 }
 
 export async function fetchCatalog(baseUrl: string, auth: AuthState): Promise<CatalogModel[]> {

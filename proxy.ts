@@ -32,7 +32,7 @@ function normalizeMessages(messages: any[]): ChatMessage[] {
   }));
 }
 
-function normalizeRequest(body: any, modelMaxTokens: number): ChatRequest {
+function normalizeRequest(body: any, modelMaxTokens: number | undefined): ChatRequest {
   const raw: ChatRequest = {
     model: body.model,
     messages: normalizeMessages(body.messages || []),
@@ -98,12 +98,12 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
         return;
       }
 
-      // Look up model's maxTokens from catalog
-      let modelMaxTokens = 4096;
+      // Look up model's maxTokens from catalog (undefined if backend didn't provide)
+      let modelMaxTokens: number | undefined;
       try {
         const catalog = await getCatalog(config.baseUrl, auth);
         const found = catalog.find((m) => m.id === body.model);
-        if (found) modelMaxTokens = found.maxTokens;
+        modelMaxTokens = found?.maxTokens;
       } catch {}
 
       const request = normalizeRequest(body, modelMaxTokens);
