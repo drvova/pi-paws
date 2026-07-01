@@ -18,6 +18,16 @@ export interface AuthState {
 
 const TOKEN_STORAGE_KEY = "paws.jwt";
 
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+
+function getCredentialsPath(): string {
+  const dir = path.join(os.homedir(), ".pi", "credentials");
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return path.join(dir, "paws.json");
+}
+
 let currentAuth: AuthState | null = null;
 
 export function decodeJwt(token: string): JwtPayload {
@@ -33,6 +43,19 @@ export function isExpired(auth: AuthState, bufferSeconds = 300): boolean {
 
 export function getStoredToken(): AuthState | null {
   if (currentAuth) return currentAuth;
+  // Try file storage (Node.js runtime)
+  try {
+    const p = getCredentialsPath();
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, "utf8"));
+      if (data.token) {
+        const payload = decodeJwt(data.token);
+        currentAuth = { token: data.token, payload };
+        return currentAuth;
+      }
+    }
+  } catch {}
+  // Fallback to localStorage (browser runtime)
   const raw = typeof localStorage !== "undefined" ? localStorage.getItem(TOKEN_STORAGE_KEY) : null;
   if (!raw) return null;
   try {
@@ -47,6 +70,12 @@ export function getStoredToken(): AuthState | null {
 export function setToken(token: string): AuthState {
   const payload = decodeJwt(token);
   currentAuth = { token, payload };
+  // File storage (Node.js runtime)
+  try {
+    const p = getCredentialsPath();
+    fs.writeFileSync(p, JSON.stringify({ token }, null, 2), { mode: 0o600 });
+  } catch {}
+  // localStorage (browser runtime)
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(TOKEN_STORAGE_KEY, token);
   }
@@ -55,6 +84,10 @@ export function setToken(token: string): AuthState {
 
 export function clearToken(): void {
   currentAuth = null;
+  try {
+    const p = getCredentialsPath();
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+  } catch {}
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
   }
