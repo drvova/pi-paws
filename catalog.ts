@@ -94,8 +94,15 @@ async function probeReasoning(baseUrl: string, auth: AuthState, modelId: string,
     model: modelId, messages: [{ role: "user", content: "Say OK" }],
     stream: false, max_tokens: 20,
   }, proxyUrl);
-  const r = data?.choices?.[0]?.message?.reasoning_content;
-  return typeof r === "string" && r.length > 0;
+  const msg = data?.choices?.[0]?.message;
+  // Check for reasoning_content field (deepseek-style)
+  if (typeof msg?.reasoning_content === "string" && msg.reasoning_content.length > 0) return true;
+  // Check usage for reasoning tokens (gemini/claude-style)
+  const usage = data?.usage;
+  const reasonTokens = usage?.completion_tokens_details?.reasoning_tokens ?? 0;
+  const totalTokens = usage?.completion_tokens ?? 0;
+  if (totalTokens > 0 && reasonTokens >= totalTokens * 0.5) return true;
+  return false;
 }
 
 async function probeTools(baseUrl: string, auth: AuthState, modelId: string, proxyUrl?: string): Promise<boolean> {
