@@ -7,6 +7,7 @@
 
 import type { AuthState } from "./auth";
 import { buildAuthHeaders } from "./auth";
+import { getCatalog, type CatalogModel } from "./catalog";
 
 export interface ProxyConfig {
   baseUrl: string;
@@ -29,6 +30,19 @@ function sseHeaders(): Record<string, string> {
 
 export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthState | null>): ProxyServer {
   const { createServer } = require("http");
+
+  // Per-model catalog lookup — avoids re-probing on every request
+  let catalogPromise: Promise<CatalogModel[]> | null = null;
+  async function getModelInfo(modelId: string, auth: AuthState): Promise<CatalogModel | undefined> {
+    try {
+      if (!catalogPromise) catalogPromise = getCatalog(config.baseUrl, auth);
+      const catalog = await catalogPromise;
+      return catalog.find((m) => m.id === modelId);
+    } catch {
+      return undefined;
+    }
+  }
+
   const server = createServer(async (req: any, res: any) => {
 
     // CORS
@@ -70,7 +84,7 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
       return;
     }
 
-    // Chat completions — transparent pass-through
+    // Chat completions — transparent pass-through with per-model adjustments
     if (req.method === "POST" && (req.url === "/v1/chat/completions" || req.url === "/chat/completions")) {
       const auth = await getAuth();
       if (!auth) {
@@ -85,11 +99,20 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
       const body = JSON.parse(rawBody);
       const isStream = body.stream !== false;
 
-      // Reasoning models consume max_tokens for thinking — boost the budget
-      // so visible content has room after reasoning tokens are spent.
+      // Reasoning models split max_tokens between thinking and visible output.
+      // Pi sends a low max_tokens that gets consumed entirely by reasoning,
+      // leaving nothing to display. Boost based on per-model catalog data.
       const hasReasoning = body.thinking || body.reasoning_effort;
       if (hasReasoning && body.max_tokens) {
-        body.max_tokens = Math.min(body.max_tokens * 3, 32000);
+        const model = await getModelInfo(body.model, auth);
+        const modelMax = model?.maxTokens;
+        if (modelMax && modelMax > body.max_tokens) {
+          // Model reports a real max — use it
+          body.max_tokens = Math.min(modelMax, 32000);
+        } else if (model?.reasoning) {
+          // Reasoning model but no maxTokens from API — generous default
+          body.max_tokens = Math.max(body.max_tokens * 3, 16384);
+        }
         rawBody = JSON.stringify(body);
       }
 
