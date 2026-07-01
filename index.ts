@@ -47,20 +47,6 @@ function buildProviderConfig(authToken: string, models: any[]) {
   };
 }
 
-function modelsToPi(catalog: any[]) {
-  return catalogToPiModels(catalog, ROOT).map((m) => ({
-    id: m.id,
-    name: m.name,
-    reasoning: m.reasoning,
-    input: m.input,
-    cost: m.cost,
-    contextWindow: m.contextWindow,
-    maxTokens: m.maxTokens,
-    headers: m.headers,
-    compat: m.compat,
-  }));
-}
-
 export default async function (pi: ExtensionAPI) {
   const stored = getStoredToken();
   let hasCreds = !!stored;
@@ -70,13 +56,14 @@ export default async function (pi: ExtensionAPI) {
       const auth = await refreshJwt(ROOT);
       if (auth) {
         const catalog = await getCatalog(ROOT, auth, proxyUrl());
-        const models = modelsToPi(catalog);
+        const models = catalogToPiModels(catalog);
         pi.registerProvider(PROVIDER_NAME, buildProviderConfig(auth.token, models));
         console.error(`[paws] connected — ${models.length} models`);
       } else {
         hasCreds = false;
       }
-    } catch {
+    } catch (e: any) {
+      console.error("[paws] startup failed:", e.message);
       hasCreds = false;
     }
   }
@@ -94,7 +81,7 @@ export default async function (pi: ExtensionAPI) {
         const refreshed = await refreshJwt(ROOT);
         if (refreshed) {
           const catalog = await getCatalog(ROOT, refreshed, proxyUrl());
-          const models = modelsToPi(catalog);
+          const models = catalogToPiModels(catalog);
           pi.registerProvider(PROVIDER_NAME, buildProviderConfig(refreshed.token, models));
           console.error(`[paws] connected — ${models.length} models`);
         }
@@ -140,7 +127,7 @@ export default async function (pi: ExtensionAPI) {
           return;
         }
         const catalog = await fetchCatalog(ROOT, refreshed, proxyUrl());
-        const models = modelsToPi(catalog);
+        const models = catalogToPiModels(catalog);
         pi.registerProvider(PROVIDER_NAME, buildProviderConfig(refreshed.token, models));
         ctx.ui.notify(`Paws: Refreshed ${models.length} models`, "info");
       } catch (err: any) {

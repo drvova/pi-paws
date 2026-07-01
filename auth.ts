@@ -33,7 +33,7 @@ let currentAuth: AuthState | null = null;
 export function decodeJwt(token: string): JwtPayload {
   const parts = token.split(".");
   if (parts.length !== 3) throw new Error("Invalid JWT: expected 3 parts");
-  const payload = JSON.parse(atob(parts[1]));
+  const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
   return { id: payload.id, exp: payload.exp, jti: payload.jti };
 }
 

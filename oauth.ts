@@ -23,7 +23,8 @@ function parseJwtExp(token: string): number {
   try {
     const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
     return payload.exp * 1000;
-  } catch {
+  } catch (e: any) {
+    console.error("[paws-oauth] JWT expiry parse failed, assuming 1yr:", e.message);
     return Date.now() + 365 * 24 * 60 * 60 * 1000;
   }
 }
