@@ -132,6 +132,19 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
     res.end("Not found");
   });
 
+  server.on("error", (err: any) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`[paws] port ${config.port} in use — killing stale proxy and retrying`);
+      const { execSync } = require("child_process");
+      try {
+        execSync(`fuser -k ${config.port}/tcp`, { stdio: "ignore" });
+        setTimeout(() => server.listen(config.port), 500);
+      } catch {}
+    } else {
+      console.error("[paws] proxy error:", err.message);
+    }
+  });
+
   server.listen(config.port);
   console.log(`Paws proxy listening on http://localhost:${config.port}`);
 
