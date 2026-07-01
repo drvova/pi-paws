@@ -54,7 +54,9 @@ export function getStoredToken(): AuthState | null {
         return currentAuth;
       }
     }
-  } catch {}
+  } catch (e: any) {
+    console.error("[paws-auth] failed to read stored token:", e.message);
+  }
   // Fallback to localStorage (browser runtime)
   const raw = typeof localStorage !== "undefined" ? localStorage.getItem(TOKEN_STORAGE_KEY) : null;
   if (!raw) return null;
@@ -62,7 +64,8 @@ export function getStoredToken(): AuthState | null {
     const payload = decodeJwt(raw);
     currentAuth = { token: raw, payload };
     return currentAuth;
-  } catch {
+  } catch (e: any) {
+    console.error("[paws-auth] failed to decode localStorage token:", e.message);
     return null;
   }
 }
@@ -74,7 +77,9 @@ export function setToken(token: string): AuthState {
   try {
     const p = getCredentialsPath();
     fs.writeFileSync(p, JSON.stringify({ token }, null, 2), { mode: 0o600 });
-  } catch {}
+  } catch (e: any) {
+    console.error("[paws-auth] failed to persist token to file:", e.message);
+  }
   // localStorage (browser runtime)
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(TOKEN_STORAGE_KEY, token);
@@ -87,7 +92,9 @@ export function clearToken(): void {
   try {
     const p = getCredentialsPath();
     if (fs.existsSync(p)) fs.unlinkSync(p);
-  } catch {}
+  } catch (e: any) {
+    console.error("[paws-auth] failed to remove token file:", e.message);
+  }
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
   }
@@ -116,11 +123,16 @@ export async function refreshJwt(baseUrl: string): Promise<AuthState | null> {
     const resp = await fetch(`${baseUrl}/api/v1/auths/`, {
       headers: { Authorization: `Bearer ${stored.token}` },
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      console.error(`[paws-auth] refresh failed: server returned ${resp.status}`);
+      return null;
+    }
     const data = await resp.json();
     if (data.token) return setToken(data.token);
-    return stored;
-  } catch {
+    console.error("[paws-auth] refresh endpoint returned no token");
+    return null;
+  } catch (e: any) {
+    console.error("[paws-auth] refresh error:", e.message);
     return null;
   }
 }

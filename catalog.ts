@@ -41,7 +41,9 @@ import * as os from "os";
 
 function getCatalogCachePath(): string {
   const dir = path.join(os.homedir(), ".pi", "credentials");
-  try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch {}
+  try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch (e: any) {
+    console.error("[paws-catalog] failed to create credentials dir:", e.message);
+  }
   return path.join(dir, "paws-catalog.json");
 }
 
@@ -219,7 +221,9 @@ export async function fetchCatalog(baseUrl: string, auth: AuthState, proxyUrl?: 
 
   const cache: CatalogCache = { models, fetchedAt: Date.now() };
   // File storage (Node.js)
-  try { fs.writeFileSync(getCatalogCachePath(), JSON.stringify(cache), { mode: 0o600 }); } catch {}
+  try { fs.writeFileSync(getCatalogCachePath(), JSON.stringify(cache), { mode: 0o600 }); } catch (e: any) {
+    console.error("[paws-catalog] failed to write catalog cache:", e.message);
+  }
   // localStorage (browser)
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(cache));
@@ -234,7 +238,9 @@ export function getCachedCatalog(): CatalogModel[] | null {
     const cache: CatalogCache = JSON.parse(raw);
     if (Date.now() - cache.fetchedAt > CACHE_TTL_MS) return null;
     return cache.models;
-  } catch {}
+  } catch (e: any) {
+    console.error("[paws-catalog] failed to read catalog cache:", e.message);
+  }
   // Fallback to localStorage (browser)
   if (typeof localStorage === "undefined") return null;
   const raw = localStorage.getItem(CATALOG_CACHE_KEY);

@@ -98,7 +98,9 @@ export default async function (pi: ExtensionAPI) {
           pi.registerProvider(PROVIDER_NAME, buildProviderConfig(refreshed.token, models));
           console.error(`[paws] connected — ${models.length} models`);
         }
-      } catch {}
+      } catch (e: any) {
+        console.error("[paws] session_start re-register failed:", e.message);
+      }
     }
   });
 

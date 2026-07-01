@@ -131,7 +131,9 @@ export async function* streamChat(
         if (!data || data === "[DONE]") return;
         try {
           yield JSON.parse(data) as ChatChunk;
-        } catch {}
+        } catch (e: any) {
+          console.error("[paws-chat] failed to parse SSE chunk:", e.message);
+        }
       }
     }
 
@@ -140,7 +142,9 @@ export async function* streamChat(
       if (data && data !== "[DONE]") {
         try {
           yield JSON.parse(data) as ChatChunk;
-        } catch {}
+        } catch (e: any) {
+          console.error("[paws-chat] failed to parse final SSE chunk:", e.message);
+        }
       }
     }
   } finally {

@@ -70,7 +70,9 @@ export async function pawsRefreshToken(
       const data = await resp.json();
       if (data.token) return { token: data.token, expires: parseJwtExp(data.token) };
     }
-  } catch {}
+  } catch (e: any) {
+    console.error("[paws-oauth] token refresh failed:", e.message);
+  }
   return credentials;
 }
 

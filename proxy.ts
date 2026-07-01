@@ -5,6 +5,8 @@
  * with auth headers. Passes SSE stream through unmodified.
  */
 
+import { createServer } from "http";
+import { execSync } from "child_process";
 import type { AuthState } from "./auth";
 import { buildAuthHeaders } from "./auth";
 import { getCatalog, type CatalogModel } from "./catalog";
@@ -29,16 +31,18 @@ function sseHeaders(): Record<string, string> {
 }
 
 export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthState | null>): ProxyServer {
-  const { createServer } = require("http");
-
   // Per-model catalog lookup — avoids re-probing on every request
   let catalogPromise: Promise<CatalogModel[]> | null = null;
   async function getModelInfo(modelId: string, auth: AuthState): Promise<CatalogModel | undefined> {
     try {
-      if (!catalogPromise) catalogPromise = getCatalog(config.baseUrl, auth);
+      if (!catalogPromise) {
+        catalogPromise = getCatalog(config.baseUrl, auth);
+        catalogPromise.catch(() => { catalogPromise = null; }); // reset on failure so next request retries
+      }
       const catalog = await catalogPromise;
       return catalog.find((m) => m.id === modelId);
-    } catch {
+    } catch (e: any) {
+      console.error("[paws-proxy] catalog lookup failed:", e.message);
       return undefined;
     }
   }
@@ -97,7 +101,7 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
       for await (const chunk of req) rawBody += chunk;
 
       const body = JSON.parse(rawBody);
-      const isStream = body.stream !== false;
+      const isStream = body.stream === true;
 
       // Reasoning models split max_tokens between thinking + output.
       // Formula: max_tokens = min(modelCap, max(piSent * scale, floor))
@@ -117,6 +121,8 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
       }
 
       try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 120_000);
         const upstreamResp = await fetch(`${config.baseUrl}/api/chat/completions`, {
           method: "POST",
           headers: {
@@ -124,7 +130,9 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
             "Content-Type": "application/json",
           },
           body: rawBody,
+          signal: controller.signal,
         });
+        clearTimeout(timeout);
 
         if (isStream) {
           res.writeHead(upstreamResp.status, sseHeaders());
@@ -166,11 +174,12 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
   server.on("error", (err: any) => {
     if (err.code === "EADDRINUSE") {
       console.error(`[paws] port ${config.port} in use — killing stale proxy and retrying`);
-      const { execSync } = require("child_process");
       try {
         execSync(`fuser -k ${config.port}/tcp`, { stdio: "ignore" });
         setTimeout(() => server.listen(config.port), 500);
-      } catch {}
+      } catch (e: any) {
+        console.error(`[paws] failed to free port ${config.port}:`, e.message);
+      }
     } else {
       console.error("[paws] proxy error:", err.message);
     }
