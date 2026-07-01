@@ -103,6 +103,26 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
       const body = JSON.parse(rawBody);
       const isStream = body.stream === true;
 
+      // Backend rejects "developer" role — rewrite to "system" (Open WebUI v0.9.6)
+      if (Array.isArray(body.messages)) {
+        for (const m of body.messages) {
+          if (m.role === "developer") m.role = "system";
+        }
+      }
+
+      // DeepSeek reasoning models require reasoning_content on assistant messages
+      // that have tool_calls (tool round-trip). Pi's SDK strips it because it's
+      // non-standard. Inject a placeholder so the backend accepts the request.
+      if (Array.isArray(body.messages)) {
+        for (const m of body.messages) {
+          if (m.role === "assistant" && m.tool_calls && !m.reasoning_content) {
+            m.reasoning_content = "";
+          }
+        }
+      }
+
+      rawBody = JSON.stringify(body);
+
       // Reasoning models split max_tokens between thinking + output.
       // Formula: max_tokens = min(modelCap, max(piSent * scale, floor))
       // where scale and floor come from per-model catalog data.
