@@ -8,7 +8,8 @@
 
 import type { AuthState } from "./auth.js";
 import { buildAuthHeaders } from "./auth.js";
-import { streamChat, chatCompletion, type ChatRequest, type ChatMessage } from "./chat.js";
+import { getCatalog, type CatalogModel } from "./catalog.js";
+import { streamChat, chatCompletion, prepareRequest, type ChatRequest, type ChatMessage } from "./chat.js";
 
 export interface ProxyConfig {
   baseUrl: string;
@@ -31,8 +32,8 @@ function normalizeMessages(messages: any[]): ChatMessage[] {
   }));
 }
 
-function normalizeRequest(body: any): ChatRequest {
-  return {
+function normalizeRequest(body: any, modelMaxTokens: number): ChatRequest {
+  const raw: ChatRequest = {
     model: body.model,
     messages: normalizeMessages(body.messages || []),
     stream: body.stream !== false,
@@ -44,6 +45,7 @@ function normalizeRequest(body: any): ChatRequest {
     tool_choice: body.tool_choice,
     reasoning_effort: body.reasoning_effort,
   };
+  return prepareRequest(raw, modelMaxTokens);
 }
 
 function sseHeaders(): Record<string, string> {
@@ -96,7 +98,15 @@ export function createProxy(config: ProxyConfig, getAuth: () => Promise<AuthStat
         return;
       }
 
-      const request = normalizeRequest(body);
+      // Look up model's maxTokens from catalog
+      let modelMaxTokens = 4096;
+      try {
+        const catalog = await getCatalog(config.baseUrl, auth);
+        const found = catalog.find((m) => m.id === body.model);
+        if (found) modelMaxTokens = found.maxTokens;
+      } catch {}
+
+      const request = normalizeRequest(body, modelMaxTokens);
 
       try {
         if (request.stream) {

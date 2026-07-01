@@ -30,6 +30,33 @@ export interface ChatRequest {
   reasoning_effort?: string;
 }
 
+/** Strip system messages — backend handles its own system prompt. */
+export function stripSystemMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter((m) => m.role !== "system");
+}
+
+/** Apply model's maxTokens from catalog when caller didn't set one. */
+export function applyMaxTokens(
+  request: ChatRequest,
+  modelMaxTokens: number,
+): ChatRequest {
+  if (!request.max_tokens || request.max_tokens > modelMaxTokens) {
+    return { ...request, max_tokens: modelMaxTokens };
+  }
+  return request;
+}
+
+/** Prepare request: strip system msgs + enforce model maxTokens. */
+export function prepareRequest(
+  request: ChatRequest,
+  modelMaxTokens: number,
+): ChatRequest {
+  return applyMaxTokens(
+    { ...request, messages: stripSystemMessages(request.messages) },
+    modelMaxTokens,
+  );
+}
+
 export interface ChatChunk {
   id: string;
   object: string;
